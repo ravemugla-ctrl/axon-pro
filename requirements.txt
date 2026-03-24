@@ -4,3 +4,5 @@ openpyxl
 plotly
 requests
 fpdf
+sqlalchemy
+psycopg2-binary
