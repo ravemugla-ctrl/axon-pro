@@ -4,7 +4,8 @@ import os
 import requests
 
 # --- 1. AYARLAR ---
-SAVED_GROQ_KEY = st.secrets["GROQ_API_KEY"]
+import os
+SAVED_GROQ_KEY = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
 
 st.set_page_config(page_title="AXON PRO | Veri Borsası", layout="wide")
 
