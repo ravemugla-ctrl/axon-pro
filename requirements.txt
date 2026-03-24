@@ -1,3 +1,2 @@
 streamlit
 pandas
-crewai==0.1.32
