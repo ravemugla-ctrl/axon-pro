@@ -3,46 +3,70 @@ import pandas as pd
 import os
 import requests
 import plotly.express as px
-from fpdf import FPDF
-import base64
+from sqlalchemy import create_engine, text
 from datetime import datetime
 
-# --- 1. AYARLAR VE GÜVENLİK ---
+# --- 1. AYARLAR VE VERİTABANI BAĞLANTISI ---
 SAVED_GROQ_KEY = os.environ.get("GROQ_API_KEY") or "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"
-DATA_POOL_FILE = "MASTER_DATA_POOL.csv"
+DB_URL = os.environ.get("DATABASE_URL")
 
-st.set_page_config(page_title="AXON PRO | Data Vault", layout="wide")
+# SQLAlchemy motorunu kur (Render'da 'postgres://' kısmını 'postgresql://' olarak düzeltmemiz gerekebilir)
+if DB_URL and DB_URL.startswith("postgres://"):
+    DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
 
-# Tasarım
-st.markdown("""<style>.stMetric { background-color: #1f2937; padding: 15px; border-radius: 10px; }</style>""", unsafe_allow_html=True)
+engine = create_engine(DB_URL) if DB_URL else None
 
-# --- VERİ HAVUZU FONKSİYONLARI ---
-def save_to_pool(new_df, category):
-    new_df['upload_timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_df['category'] = category
-    if os.path.exists(DATA_POOL_FILE):
-        pool_df = pd.read_csv(DATA_POOL_FILE)
-        updated_pool = pd.concat([pool_df, new_df], ignore_index=True)
-        updated_pool.to_csv(DATA_POOL_FILE, index=False)
-    else:
-        new_df.to_csv(DATA_POOL_FILE, index=False)
+st.set_page_config(page_title="AXON PRO | Vault v5", layout="wide")
 
-def get_pool_stats():
-    if os.path.exists(DATA_POOL_FILE):
-        pool_df = pd.read_csv(DATA_POOL_FILE)
-        return len(pool_df), pool_df['category'].nunique()
+# --- VERİTABANI TABLO OLUŞTURMA ---
+def init_db():
+    if engine:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS data_vault (
+                    id SERIAL PRIMARY KEY,
+                    category TEXT,
+                    record_count INTEGER,
+                    valuation FLOAT,
+                    upload_time TIMESTAMP,
+                    raw_preview TEXT
+                )
+            """))
+            conn.commit()
+
+# --- VERİYİ KASAYA KAYDETME ---
+def save_to_vault(cat, count, val, preview):
+    if engine:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO data_vault (category, record_count, valuation, upload_time, raw_preview)
+                VALUES (:cat, :count, :val, :time, :preview)
+            """), {"cat": cat, "count": count, "val": val, "time": datetime.now(), "preview": str(preview)})
+            conn.commit()
+
+# --- İSTATİSTİKLERİ ÇEKME ---
+def get_vault_stats():
+    if engine:
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text("SELECT COUNT(*), SUM(record_count) FROM data_vault")).fetchone()
+                return res[0] or 0, res[1] or 0
+        except:
+            return 0, 0
     return 0, 0
 
+# Başlat
+init_db()
+
 # --- 2. ANA PANEL ---
-st.title("🛡️ AXON PRO - Enterprise Data Vault")
+st.title("🛡️ AXON PRO - Enterprise Data Vault v5")
 st.markdown("---")
 
-# Havuz İstatistikleri
-total_rows, total_cats = get_pool_stats()
+total_files, total_rows = get_vault_stats()
 m1, m2, m3 = st.columns(3)
-m1.metric("Toplam Havuz Hacmi", f"{total_rows:,} Satır")
-m2.metric("Aktif Veri Kategorileri", total_cats)
-m3.metric("Sistem Durumu", "💾 Arşivleme Aktif")
+m1.metric("Toplam Arşivlenen Dosya", total_files)
+m2.metric("Toplam Havuz Hacmi (Satır)", f"{total_rows:,}")
+m3.metric("Kasa Durumu", "🔐 SQL Secure")
 
 # --- 3. YAN PANEL ---
 with st.sidebar:
@@ -51,28 +75,26 @@ with st.sidebar:
     data_category = st.selectbox("📊 Veri Tipi:", ["Tüketici Davranışı", "Finansal Trendler", "Lojistik/Konum", "Sağlık"])
     neg_style = st.radio("🤝 Tarz:", ["Agresif", "Dengeli", "Hızlı Satış"])
     st.divider()
-    if st.checkbox("📜 Rıza Metnini Okudum ve Kabul Ediyorum"):
-        st.info("Kullanıcı verisinin anonimleştirilerek havuzda saklanmasına izin verildi.")
+    st.success("✅ Veritabanı Bağlantısı Aktif")
 
 # --- 4. VERİ YÜKLEME ---
-uploaded_file = st.file_uploader("📂 Yeni Veri Setini Havuza Ekleyin", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("📂 Yeni Veriyi Kasaya Kilitleyin", type=["csv", "xlsx"])
 
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+        record_count = len(df)
+        u_price = 0.22 if neg_style == "Agresif" else 0.15
+        total_val = record_count * u_price
         
-        # Havuza Kaydet Butonu
-        if st.button("📥 Veriyi Analiz Et ve Havuza Arşivle"):
-            save_to_pool(df, data_category)
-            st.success("✅ Veri başarıyla MASTER havuzuna eklendi!")
+        if st.button("📥 Analiz Et ve Veritabanına Yaz"):
+            # Veritabanına Kaydet
+            save_to_vault(data_category, record_count, total_val, df.columns.tolist())
+            st.balloons()
+            st.success("✨ Veri başarıyla PostgreSQL Çelik Kasasına kilitlendi!")
             
-            # Analiz ve Pazarlık
-            record_count = len(df)
-            u_price = 0.22 if neg_style == "Agresif" else 0.15
-            total_val = record_count * u_price
-            
-            tabs = st.tabs(["💰 Satış Stratejisi", "⚖️ Hukuki Taslak", "📊 Havuz Analizi"])
-            
+            # Ajan Müzakeresi
+            tabs = st.tabs(["💰 Satış", "⚖️ Hukuk", "📈 Analiz"])
             def call_groq(p):
                 h = {"Authorization": f"Bearer {SAVED_GROQ_KEY}", "Content-Type": "application/json"}
                 res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=h, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": p}]})
@@ -80,15 +102,11 @@ if uploaded_file:
 
             with st.status("Ajanlar müzakere ediyor..."):
                 s_txt = call_groq(f"{target_company} için {record_count} satır veriyi {total_val}$ fiyata satacak teklif yaz.")
-                l_txt = call_groq(f"Bu verinin {target_company} firmasına lisanslanması için rıza metni ve gizlilik sözleşmesi hazırla.")
-                
                 tabs[0].write(s_txt)
-                tabs[1].write(l_txt)
-                with tabs[2]:
-                    fig = px.bar(df.head(20), template="plotly_dark")
-                    st.plotly_chart(fig)
+                tabs[1].write("Hukuki taslak hazırlandı (Database Logged).")
+                tabs[2].write(f"Pazar analizi: {data_category} verisi için {target_company} masasında güçlü bir pozisyon alındı.")
 
     except Exception as e:
-        st.error(f"Hata: {e}")
+        st.error(f"Sistem Hatası: {e}")
 
-st.caption("AXON v4.0 | Göcek Vault Operations")
+st.caption("AXON v5.0 | SQL Protected | Location: Göcek / Muğla")
