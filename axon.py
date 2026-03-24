@@ -4,8 +4,8 @@ import os
 import requests
 
 # --- 1. AYARLAR ---
-import os
-SAVED_GROQ_KEY = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
+# Render'dan okumayı dener, bulamazsa doğrudan yazar
+SAVED_GROQ_KEY = os.environ.get("GROQ_API_KEY") or "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"
 
 st.set_page_config(page_title="AXON PRO | Veri Borsası", layout="wide")
 
@@ -25,9 +25,12 @@ uploaded_file = st.file_uploader("Pazarlanacak veri dosyasını seçin", type=["
 
 record_count = 0
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-    record_count = len(df)
-    st.info(f"📁 {record_count} satır veri tespit edildi.")
+    try:
+        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+        record_count = len(df)
+        st.info(f"📁 {record_count} satır veri tespit edildi.")
+    except Exception as e:
+        st.error(f"Dosya okuma hatası: {e}")
 
 # --- 4. DİNAMİK METRİKLER ---
 unit_price = 0.18
@@ -44,17 +47,18 @@ if st.button(f"{target_company} ile Müzakereyi Başlat"):
         st.warning("Lütfen önce bir dosya yükleyin.")
     else:
         with st.status("AXON Ajanları müzakereye başlıyor...", expanded=True):
-            # Groq API'ye doğrudan istek atıyoruz (Ağır kütüphane gerektirmez)
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {SAVED_GROQ_KEY}", "Content-Type": "application/json"}
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": f"Sen bir veri borsası uzmanısın. {target_company} firmasına {record_count} satır {data_category} verisini {total_valuation} dolara satmak için profesyonel bir teklif hazırla."}]
-            }
-            response = requests.post(url, headers=headers, json=payload)
-            result = response.json()['choices'][0]['message']['content']
-            
-        st.success("✅ Pazarlık Tamamlandı!")
-        st.write(result)
+            try:
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {SAVED_GROQ_KEY}", "Content-Type": "application/json"}
+                payload = {
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [{"role": "user", "content": f"Sen bir veri borsası uzmanısın. {target_company} firmasına {record_count} satır {data_category} verisini {total_valuation} dolara satmak için profesyonel bir teklif hazırla."}]
+                }
+                response = requests.post(url, headers=headers, json=payload)
+                result = response.json()['choices'][0]['message']['content']
+                st.success("✅ Pazarlık Tamamlandı!")
+                st.write(result)
+            except Exception as e:
+                st.error(f"API Hatası: {e}")
 
-st.caption("AXON v2.0 | Render Cloud Edition")
+st.caption("AXON v2.1 | Render Production Ready")
